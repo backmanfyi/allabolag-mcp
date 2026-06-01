@@ -15,7 +15,6 @@
   "scripts": {
     "clean": "rimraf 'dist/'",
     "build": "bun run clean && tsc && shx chmod +x dist/*.js",
-    "prepare": "rimraf dist && tsc && shx chmod +x dist/*.js",
     "start": "bun run build && node dist/index.js",
     "inspector": "bun run build && mcp-inspector node dist/index.js",
     "watch": "tsc --watch"
