@@ -32,7 +32,13 @@ server.tool(
 
       logger.log(`Found ${results.length} companies`);
       const formattedResults = results.map(company => (
-        `${company.name} (${company.orgNumber})\nLocation: ${company.location}\nLink: https://www.allabolag.se${company.link}\n`
+        [
+          `${company.name} (${company.orgNumber})`,
+          `Location: ${company.location}`,
+          company.revenue ? `Revenue: ${company.revenue}` : null,
+          company.employees ? `Employees: ${company.employees}` : null,
+          `Details: call get-company-info with orgnr "${company.orgNumber}"`,
+        ].filter(Boolean).join("\n") + "\n"
       )).join("\n");
 
       return {
@@ -50,21 +56,24 @@ server.tool(
 
 server.tool(
   "get-company-info",
-  "Get detailed company information using the company's page link from search results",
-  { link: z.string().describe("The link path from search results (e.g. /foretag/company-name/...)") },
-  async ({ link }) => {
+  "Get detailed company information by Swedish organisation number (orgnr) from a search result",
+  { orgnr: z.string().describe("Swedish organisation number, e.g. 559568-6196 (from search-companies)") },
+  async ({ orgnr }) => {
     logger.log("using tool get-company-info");
     try {
-      const info = await getCompanyInfo(link);
-      
+      const info = await getCompanyInfo(orgnr);
+
       const formattedInfo = [
         `Company Name: ${info.name}`,
         `Organization Number: ${info.orgNumber}`,
         `Location: ${info.location}`,
         `Status: ${info.status}`,
+        info.ceo ? `CEO / contact: ${info.ceo}` : null,
         info.revenue ? `Revenue: ${info.revenue}` : null,
+        info.profit ? `Profit: ${info.profit}` : null,
         info.employees ? `Employees: ${info.employees}` : null,
         info.phone ? `Phone: ${info.phone}` : null,
+        info.email ? `Email: ${info.email}` : null,
         info.industry?.length ? `Industries: ${info.industry.join(", ")}` : null,
         info.description ? `\nDescription: ${info.description}` : null,
       ]

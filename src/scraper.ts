@@ -1,8 +1,15 @@
-import axios from 'axios';
-import * as cheerio from 'cheerio';
-import { logger } from './logger.js';
+import axios from "axios";
+import { logger } from "./logger.js";
 
-interface CompanySearchResult {
+const BASE = "https://www.allabolag.se";
+const HEADERS = {
+  "User-Agent":
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "Accept-Language": "sv-SE,sv;q=0.9,en;q=0.8",
+};
+
+export interface CompanySearchResult {
   name: string;
   orgNumber: string;
   location: string;
@@ -11,174 +18,155 @@ interface CompanySearchResult {
   employees?: string;
 }
 
-interface CompanyInfo {
+export interface CompanyInfo {
   name: string;
   orgNumber: string;
   location: string;
   status: string;
   revenue?: string;
+  profit?: string;
   employees?: string;
   description?: string;
   phone?: string;
+  email?: string;
+  ceo?: string;
   industry?: string[];
 }
 
-export async function searchCompanies(query: string): Promise<CompanySearchResult[]> {
-  try {
-    const encodedQuery = encodeURIComponent(query);
-    const url = `https://www.allabolag.se/bransch-s%C3%B6k?q=${encodedQuery}`;
-    
-    logger.log('Fetching URL:', url);
-    
-    const response = await axios.get(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Connection': 'keep-alive',
-      }
-    });
-    
-    logger.log('Response received, status:', response.status);
-    
-    const $ = cheerio.load(response.data);
-    const results: CompanySearchResult[] = [];
-    
-    // Debug: Log the entire HTML to check structure
-    logger.log('Page HTML:', response.data.substring(0, 500) + '...');
-    
-    // First try the search results container
-    const searchContainer = $('.MuiGrid-root.SearchResultCard-card');
-    logger.log('Found search results:', searchContainer.length);
-    
-    searchContainer.each((_, element) => {
-      try {
-        const name = $(element).find('h2.MuiTypography-h3 a').first().text().trim();
-        const orgNumberEl = $(element).find('.CardHeader-propertyList').filter((_, el) => $(el).text().includes('Org.nr'));
-        const orgNumber = orgNumberEl.text().replace('Org.nr', '').trim();
-        const location = $(element).find('.fa-location-dot').parent().text().trim();
-        const link = $(element).find('h2.MuiTypography-h3 a').first().attr('href') || '';
-        
-        const revenueEl = $(element).find('.CardHeader-propertyBlock').filter((_, el) => $(el).text().includes('Omsättning'));
-        const revenue = revenueEl.text().replace('Omsättning', '').replace(/\\d{4}/, '').trim();
-        
-        const employeesEl = $(element).find('.CardHeader-propertyBlock').filter((_, el) => $(el).text().includes('Anställda'));
-        const employees = employeesEl.text().replace('Anställda', '').trim();
-        
-        logger.log('Found company:', { name, orgNumber, location, link });
-        
-        if (name && orgNumber) {
-          results.push({
-            name,
-            orgNumber,
-            location,
-            link,
-            revenue: revenue || undefined,
-            employees: employees || undefined
-          });
-        }
-      } catch (err) {
-        logger.log('Error parsing company element:', err);
-      }
-    });
-    
-    logger.log('Total results found:', results.length);
-    return results;
-  } catch (error) {
-    logger.log('Error searching companies:', error);
-    throw new Error('Failed to search companies');
-  }
+function formatOrgNumber(orgnr: string | null | undefined): string {
+  const digits = (orgnr ?? "").replace(/\D/g, "");
+  return digits.length === 10
+    ? `${digits.slice(0, 6)}-${digits.slice(6)}`
+    : orgnr ?? "";
 }
 
-export async function getCompanyInfo(path: string): Promise<CompanyInfo> {
-  try {
-    const url = `https://www.allabolag.se${path}`;
-    logger.log('Fetching company URL:', url);
-    
-    const response = await axios.get(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Connection': 'keep-alive',
-      }
-    });
-    
-    logger.log('Response received, status:', response.status);
-    const $ = cheerio.load(response.data);
-    
-    // Get the title which contains both name and org number
-    const title = $('title').text().trim();
-    const titleMatch = title.match(/^(.+?) - (\d{6}-\d{4})/);
-    logger.log('Title match:', titleMatch);
-    
-    if (!titleMatch) {
-      throw new Error('Could not parse company name and org number from title');
-    }
-    
-    const [, name, orgNumber] = titleMatch;
-    logger.log('Found name:', name);
-    logger.log('Found org number:', orgNumber);
-    
-    // Get location from meta description
-    const metaDescription = $('meta[name="description"]').attr('content') || '';
-    logger.log('Meta description:', metaDescription);
-    
-    // Look for address in the page content
-    const location = $('.fa-location-dot').parent().text().trim();
-    logger.log('Found location:', location);
-    
-    // Get phone number if available
-    const phone = $('.fa-phone-flip').parent().text().replace('Telefon', '').trim();
-    logger.log('Found phone:', phone);
-    
-    // Get company metrics
-    const metrics = $('.CardHeader-propertyBlock');
-    let revenue: string | undefined;
-    let employees: string | undefined;
-    
-    metrics.each((_, el) => {
-      const text = $(el).text().trim();
-      if (text.includes('Omsättning')) {
-        revenue = text.replace('Omsättning', '').replace(/\d{4}/, '').trim();
-      } else if (text.includes('Anställda')) {
-        employees = text.replace('Anställda', '').trim();
-      }
-    });
-    
-    logger.log('Found revenue:', revenue);
-    logger.log('Found employees:', employees);
-    
-    // Get industry tags
-    const industries: string[] = [];
-    $('.IndustryTags-tags .Tag-root a').each((_, element) => {
-      industries.push($(element).text().trim());
-    });
-    logger.log('Found industries:', industries);
-    
-    // Get company description if available
-    const description = $('.company-description').text().trim();
-    logger.log('Found description:', description);
-    
-    const result = {
-      name,
-      orgNumber,
-      location,
-      status: 'Active', // Default to active since we can see the page
-      revenue,
-      employees,
-      description: description || undefined,
-      phone: phone || undefined,
-      industry: industries.length > 0 ? industries : undefined
-    };
-    
-    logger.log('Final result:', result);
-    return result;
-  } catch (error) {
-    logger.log('Error getting company info:', error);
-    if (error instanceof Error) {
-      logger.log('Error details:', { message: error.message, stack: error.stack });
-    }
-    throw new Error('Failed to get company information');
+// allabolag.se is a Next.js SPA: the search results are not rendered into the
+// HTML, they are embedded as JSON in <script id="__NEXT_DATA__"> and hydrated
+// client-side. We parse that JSON directly instead of scraping the DOM.
+function extractNextData(html: string): unknown {
+  const match = html.match(
+    /<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/,
+  );
+  if (!match) {
+    throw new Error("allabolag.se layout changed: __NEXT_DATA__ not found");
   }
-} 
+  return JSON.parse(match[1]);
+}
+
+interface RawCompany {
+  name?: string;
+  legalName?: string;
+  orgnr?: string;
+  status?: string;
+  statusRemarks?: string[];
+  revenue?: number | string | null;
+  profit?: number | string | null;
+  currency?: string | null;
+  employees?: number | string | null;
+  description?: string | null;
+  phone?: string | null;
+  mobile?: string | null;
+  email?: string | null;
+  location?: { municipality?: string };
+  visitorAddress?: { addressLine?: string; zipCode?: string; postPlace?: string };
+  postalAddress?: { addressLine?: string; zipCode?: string; postPlace?: string };
+  contactPerson?: { name?: string; role?: string };
+  industries?: Array<{ name?: string }>;
+}
+
+async function fetchCompanies(query: string): Promise<RawCompany[]> {
+  const url = `${BASE}/bransch-s%C3%B6k?q=${encodeURIComponent(query)}`;
+  logger.log("Fetching:", url);
+  const response = await axios.get(url, { headers: HEADERS });
+  const data = extractNextData(response.data) as {
+    props?: {
+      pageProps?: {
+        hydrationData?: {
+          searchStore?: {
+            companies?: { companies?: RawCompany[] };
+            companiesByName?: { companies?: RawCompany[] };
+          };
+        };
+      };
+    };
+  };
+  const store = data?.props?.pageProps?.hydrationData?.searchStore ?? {};
+  const companies =
+    store?.companies?.companies ?? store?.companiesByName?.companies ?? [];
+  logger.log("Companies parsed:", companies.length);
+  return companies;
+}
+
+function locationOf(c: RawCompany): string {
+  const addr = c.visitorAddress ?? c.postalAddress ?? {};
+  return [addr.addressLine, addr.zipCode, addr.postPlace ?? c.location?.municipality]
+    .filter(Boolean)
+    .join(", ");
+}
+
+function moneyOf(
+  value: number | string | null | undefined,
+  currency: string | null | undefined,
+): string | undefined {
+  if (value === null || value === undefined || value === "") return undefined;
+  return `${value} ${currency ?? "KSEK"}`;
+}
+
+function employeesOf(
+  value: number | string | null | undefined,
+): string | undefined {
+  return value === null || value === undefined ? undefined : String(value);
+}
+
+export async function searchCompanies(
+  query: string,
+): Promise<CompanySearchResult[]> {
+  const companies = await fetchCompanies(query);
+  return companies
+    .map((c) => ({
+      name: c.legalName || c.name || "",
+      orgNumber: formatOrgNumber(c.orgnr),
+      location: locationOf(c),
+      // get-company-info re-queries by org number, so that is the stable handle
+      link: formatOrgNumber(c.orgnr),
+      revenue: moneyOf(c.revenue, c.currency),
+      employees: employeesOf(c.employees),
+    }))
+    .filter((r) => r.name && r.orgNumber);
+}
+
+export async function getCompanyInfo(orgnr: string): Promise<CompanyInfo> {
+  const digits = (orgnr ?? "").replace(/\D/g, "");
+  const companies = await fetchCompanies(digits || orgnr);
+  const company =
+    companies.find((c) => (c.orgnr ?? "").replace(/\D/g, "") === digits) ??
+    companies[0];
+  if (!company) {
+    throw new Error(`No company found for "${orgnr}"`);
+  }
+  const remarks = Array.isArray(company.statusRemarks)
+    ? company.statusRemarks.join("; ")
+    : "";
+  return {
+    name: company.legalName || company.name || "",
+    orgNumber: formatOrgNumber(company.orgnr),
+    location: locationOf(company),
+    status: company.status || remarks || "Aktiv",
+    revenue: moneyOf(company.revenue, company.currency),
+    profit: moneyOf(company.profit, company.currency),
+    employees: employeesOf(company.employees),
+    description: company.description || undefined,
+    phone: company.phone || company.mobile || undefined,
+    email: company.email || undefined,
+    ceo: company.contactPerson?.name
+      ? `${company.contactPerson.name}${
+          company.contactPerson.role ? ` (${company.contactPerson.role})` : ""
+        }`
+      : undefined,
+    industry: Array.isArray(company.industries)
+      ? company.industries
+          .map((i) => i.name)
+          .filter((n): n is string => Boolean(n))
+      : undefined,
+  };
+}
