@@ -15,6 +15,7 @@
   "scripts": {
     "clean": "rimraf 'dist/'",
     "build": "bun run clean && tsc && shx chmod +x dist/*.js",
+    "prepare": "rimraf dist && tsc && shx chmod +x dist/*.js",
     "start": "bun run build && node dist/index.js",
     "inspector": "bun run build && mcp-inspector node dist/index.js",
     "watch": "tsc --watch"
@@ -31,7 +32,8 @@
     "@types/bun": "latest",
     "@types/cheerio": "^0.22.35",
     "rimraf": "^6.0.1",
-    "shx": "^0.4.0"
+    "shx": "^0.4.0",
+    "typescript": "^5"
   },
   "peerDependencies": {
     "typescript": "^5"
